@@ -1,0 +1,43 @@
+{
+  "name": "grid-discord-news-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot that automatically generates and posts news updates using AI Power Grid for text and image generation",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIPowerGrid/grid-discord-news-bot.git"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "news",
+    "AI",
+    "AI-Power-Grid",
+    "text-generation",
+    "image-generation",
+    "RSS"
+  ],
+  "author": "AI Power Grid",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/AIPowerGrid/grid-discord-news-bot/issues"
+  },
+  "homepage": "https://github.com/AIPowerGrid/grid-discord-news-bot#readme",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1",
+    "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
