@@ -1,4 +1,4 @@
-# Discord News Bot (Powered by AI Power Grid)
+# Discord News Bot (Powered by the Grid)
 
 A Discord bot that automatically generates and posts real news updates using AI Power Grid for text and image generation. The bot fetches news from RSS feeds, enhances the content with AI, and allows users to interact with it to learn more about recent news.
 
