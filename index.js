@@ -597,28 +597,28 @@ async function fetchLatestNews() {
               }
               
               // Special handling for CNN feeds
-              if (feed.url.includes('cnn.com') && item.description) {
+              if (feed.url.includes('cnn.com')) {
                 console.log('CONTENT DEBUG - Special handling for CNN feed');
                 
-                // CNN often puts the actual content in description
-                if (typeof item.description === 'string') {
-                  // Handle CDATA wrapped content
-                  if (item.description.includes('CDATA')) {
-                    const cdataMatch = item.description.match(/<!\[CDATA\[(.*?)\]\]>/s);
-                    if (cdataMatch && cdataMatch[1]) {
-                      const cdataContent = cdataMatch[1].trim();
-                      if (cdataContent.length > 30) { // Ensure it's meaningful content
-                        console.log(`CONTENT DEBUG - Extracted CNN description from CDATA: ${cdataContent.length} chars`);
-                        content = cdataContent;
-                      }
-                    }
-                  } else {
-                    // Regular description without CDATA
-                    const plainDesc = item.description.trim();
-                    if (plainDesc.length > 30 && plainDesc.length > content.length) {
-                      console.log(`CONTENT DEBUG - Using CNN description: ${plainDesc.length} chars`);
-                      content = plainDesc;
-                    }
+                // CNN often has very limited content, so construct a better description
+                // using the title and link to create a minimal but usable description
+                if (item.title) {
+                  const cnnMinimalContent = `News from CNN: ${item.title}. `;
+                  
+                  // Add a source reference
+                  const sourceRef = item.link ? `Read more at ${item.link}` : 'Source: CNN News';
+                  
+                  // If we still have too little content, use this as a baseline
+                  if (content.length < 50) {
+                    content = cnnMinimalContent + sourceRef;
+                    console.log(`CONTENT DEBUG - Using minimal CNN content construction: ${content.length} chars`);
+                  }
+                  
+                  // Add this to our enhancedContent options later
+                  if (!item.contentSnippet && !item.summary && !item.description) {
+                    console.log('CONTENT DEBUG - CNN feed item has no content fields, adding headline to enhancement options');
+                    if (!enhancedContent) enhancedContent = [];
+                    enhancedContent.push(`Headline: ${item.title}`);
                   }
                 }
               }
