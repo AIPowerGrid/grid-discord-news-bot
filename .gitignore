@@ -68,4 +68,10 @@ Desktop.ini
 # Data files
 data/
 temp/
-tmp/ 
+tmp/
+
+# Editor files
+.cursor/
+
+# Example repositories
+example_repos/

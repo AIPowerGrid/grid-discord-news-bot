@@ -1,0 +1,56 @@
+[
+  {
+    "performance": 0.0,
+    "queued": 0.0,
+    "jobs": 0.0,
+    "eta": 0,
+    "type": "image",
+    "name": "Anything Diffusion",
+    "count": 1
+  },
+  {
+    "performance": 172016.7,
+    "queued": 0.0,
+    "jobs": 0.0,
+    "eta": 0,
+    "type": "image",
+    "name": "Flux.1-Schnell fp8 (Compact)",
+    "count": 1
+  },
+  {
+    "performance": 0.0,
+    "queued": 0.0,
+    "jobs": 0.0,
+    "eta": 0,
+    "type": "image",
+    "name": "ICBINP XL",
+    "count": 1
+  },
+  {
+    "performance": 0.0,
+    "queued": 0.0,
+    "jobs": 0.0,
+    "eta": 0,
+    "type": "image",
+    "name": "Juggernaut XL",
+    "count": 1
+  },
+  {
+    "performance": 0.0,
+    "queued": 0.0,
+    "jobs": 0.0,
+    "eta": 0,
+    "type": "image",
+    "name": "Quiet Goodnight XL",
+    "count": 1
+  },
+  {
+    "performance": 0.0,
+    "queued": 0.0,
+    "jobs": 0.0,
+    "eta": 0,
+    "type": "image",
+    "name": "stable_diffusion",
+    "count": 2
+  }
+]
