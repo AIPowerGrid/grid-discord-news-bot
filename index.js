@@ -413,64 +413,52 @@ function scheduleNewsUpdates() {
 // Function to generate and post news to Discord
 async function generateAndPostNews() {
   try {
-    console.log('Starting news generation and posting process...');
+    console.log('Starting news update process...');
     
-    // Fetch latest news
-    const newsArticle = await fetchLatestNews();
+    // Fetch latest news from feeds
+    const newsItem = await fetchLatestNews();
     
-    // If no news article was found, exit early
-    if (!newsArticle) {
-      console.log('No news article found to process.');
+    if (!newsItem) {
+      console.error('No news items found or all have been posted already.');
       return;
     }
     
-    console.log(`Found news article: "${newsArticle.title}" from ${newsArticle.source}`);
-    console.log(`Raw content length before enhancement: ${newsArticle.content.length} chars`);
-    console.log(`Raw content preview: "${newsArticle.content.substring(0, 150)}..."`);
+    console.log(`Processing news item: "${newsItem.title}" from ${newsItem.source}`);
     
-    // Check if content is very short
-    if (newsArticle.content.length < 100) {
-      console.warn(`WARNING: Very short content (${newsArticle.content.length} chars) for news enhancement. This may lead to poor quality articles.`);
+    // Check if content is minimal
+    const contentLength = newsItem.content ? newsItem.content.length : 0;
+    const isMinimalContent = contentLength < 100 || 
+      (!newsItem.content) || 
+      (newsItem.title && newsItem.content === newsItem.title);
+    
+    // Enhance content only if we have substantial content
+    let enhancedContent;
+    if (isMinimalContent) {
+      console.log(`Using original content for minimal article (${contentLength} chars): "${newsItem.title}"`);
+      enhancedContent = newsItem.content || newsItem.title;
+    } else {
+      console.log(`Attempting to enhance content (${contentLength} chars) for: "${newsItem.title}"`);
+      // Enhance content with AI
+      try {
+        enhancedContent = await enhanceNewsContent(newsItem);
+        console.log(`Enhanced content received (${enhancedContent ? enhancedContent.length : 0} chars)...`);
+      } catch (enhanceError) {
+        console.error('Error during content enhancement:', enhanceError);
+        enhancedContent = newsItem.content;
+        console.log('Falling back to original content due to enhancement error');
+      }
     }
     
-    // Enhance the news content using AI
-    const enhancedContent = await enhanceNewsContent(newsArticle.title, newsArticle.content);
-    
+    // If enhancement failed or returned nothing, use original content
     if (!enhancedContent) {
-      console.error('Failed to enhance news content.');
-      return;
-    }
-    
-    console.log(`Enhanced article length: ${enhancedContent.article.length} chars`);
-    console.log(`Enhanced article preview: "${enhancedContent.article.substring(0, 150)}..."`);
-    
-    // Compare original and enhanced content
-    const contentRatio = enhancedContent.article.length / newsArticle.content.length;
-    console.log(`Content enhancement ratio: ${contentRatio.toFixed(2)}x (original: ${newsArticle.content.length}, enhanced: ${enhancedContent.article.length})`);
-    
-    if (contentRatio < 1.5 && enhancedContent.article.length < 500) {
-      console.warn(`WARNING: Enhancement did not significantly expand content. This may indicate a problem with the AI enhancement.`);
+      console.warn('No enhanced content returned, using original content');
+      enhancedContent = newsItem.content || newsItem.title;
     }
     
     // Post the news to Discord
-    await postNewsToDiscord(newsArticle, enhancedContent);
+    await postNewsToDiscord(newsItem.title, enhancedContent, newsItem.link, newsItem.source, newsItem.pubDate, newsItem.image);
     
-    // Check if polls are enabled
-    if (ENABLE_POLLS === 'true') {
-      // Determine if we should create a poll based on the news article
-      const shouldCreatePollResult = await shouldCreatePoll(newsArticle.title, enhancedContent.article);
-      
-      if (shouldCreatePollResult.createPoll && shouldCreatePollResult.options && shouldCreatePollResult.options.length > 0) {
-        // Create the poll
-        await createDiscordPoll(newsArticle.title, shouldCreatePollResult.options);
-      } else {
-        console.log('No poll will be created for this news article.');
-      }
-    } else {
-      console.log('Polls are disabled in configuration');
-    }
-    
-    console.log('News generation and posting completed successfully');
+    console.log('News update process completed successfully.');
   } catch (error) {
     console.error('Error generating and posting news:', error);
   }
@@ -520,7 +508,6 @@ async function fetchLatestNews() {
           // Get the next index to use for this feed (cycling through available items)
           let currentIndex = feedIndexTracker[feed.url];
           let itemsChecked = 0;
-          let foundNewArticle = false;
           
           // Loop through up to 10 items in the feed to find a new article
           while (itemsChecked < Math.min(10, parsedFeed.items.length)) {
@@ -537,35 +524,12 @@ async function fetchLatestNews() {
               // Extract content using different possible fields
               let content = item.content || item.contentSnippet || item.summary || item.description || '';
               
-              // Log content sources and lengths for debugging
-              console.log(`CONTENT DEBUG - Content sources available:`, {
-                content: item.content ? 'available' : 'none',
-                contentSnippet: item.contentSnippet ? 'available' : 'none',
-                summary: item.summary ? 'available' : 'none',
-                description: item.description ? 'available' : 'none'
-              });
+              // Print the full item structure for debugging
+              console.log('FULL ITEM DEBUG - Keys:', Object.keys(item));
               
-              // Log full item structure for debugging
-              console.log('FULL ITEM DEBUG:', JSON.stringify(item, null, 2).substring(0, 500) + '...');
-              
-              // Try harder to parse content from HTML
-              if (item.description && item.description.includes('CDATA')) {
-                // Extract content from CDATA section
-                const cdataMatch = item.description.match(/<!\[CDATA\[(.*?)\]\]>/s);
-                if (cdataMatch && cdataMatch[1]) {
-                  console.log('CONTENT DEBUG - Extracted content from CDATA section');
-                  const cdataContent = cdataMatch[1].trim();
-                  if (cdataContent.length > content.length) {
-                    content = cdataContent;
-                  }
-                }
-              }
-              
-              // Check for HTML content and extract text
-              if ((content.includes('<p>') || content.includes('<div>')) && content.length > 0) {
-                console.log('CONTENT DEBUG - Extracting text from HTML content');
+              // If item has HTML content, try to extract plain text
+              if (typeof content === 'string' && (content.includes('<') && content.includes('>'))) {
                 try {
-                  // Remove HTML tags but preserve paragraph breaks
                   const plainText = content
                     .replace(/<p[^>]*>/gi, '\n\n')
                     .replace(/<br\s*\/?>/gi, '\n')
@@ -578,48 +542,36 @@ async function fetchLatestNews() {
                     .replace(/\n{3,}/g, '\n\n')
                     .trim();
                     
-                  if (plainText.length > 0) {
+                  if (plainText.length > content.length / 2) { // Only use if we didn't lose too much content
+                    console.log(`HTML parsing extracted ${plainText.length} chars from ${content.length} chars of HTML`);
                     content = plainText;
-                    console.log(`CONTENT DEBUG - Extracted ${plainText.length} chars of plain text from HTML`);
                   }
                 } catch (error) {
-                  console.error('CONTENT DEBUG - Error extracting text from HTML:', error.message);
+                  console.error('Error parsing HTML content:', error);
                 }
               }
               
-              // Parse media:content or media:description if available
-              if (item['media:description'] && item['media:description']['#']) {
-                console.log('CONTENT DEBUG - Found media:description');
-                const mediaDesc = item['media:description']['#'].trim();
-                if (mediaDesc.length > content.length) {
-                  content = mediaDesc;
-                }
-              }
-              
-              // Special handling for CNN feeds
+              // For CNN feeds, try to extract full article content
               if (feed.url.includes('cnn.com')) {
-                console.log('CONTENT DEBUG - Special handling for CNN feed');
-                
-                // CNN often has very limited content, so construct a better description
-                // using the title and link to create a minimal but usable description
-                if (item.title) {
-                  const cnnMinimalContent = `News from CNN: ${item.title}. `;
-                  
-                  // Add a source reference
-                  const sourceRef = item.link ? `Read more at ${item.link}` : 'Source: CNN News';
-                  
-                  // If we still have too little content, use this as a baseline
-                  if (content.length < 50) {
-                    content = cnnMinimalContent + sourceRef;
-                    console.log(`CONTENT DEBUG - Using minimal CNN content construction: ${content.length} chars`);
+                console.log('CNN feed detected - attempting to extract more content');
+                try {
+                  // Sometimes CNN puts content in content:encoded
+                  if (item['content:encoded']) {
+                    const contentEncoded = item['content:encoded'];
+                    if (typeof contentEncoded === 'string' && contentEncoded.length > content.length) {
+                      console.log(`Found content:encoded with ${contentEncoded.length} chars`);
+                      // Strip HTML
+                      const plainContentEncoded = contentEncoded
+                        .replace(/<[^>]*>/g, '')
+                        .replace(/\n{3,}/g, '\n\n')
+                        .trim();
+                      if (plainContentEncoded.length > content.length) {
+                        content = plainContentEncoded;
+                      }
+                    }
                   }
-                  
-                  // Add this to our enhancedContent options later
-                  if (!item.contentSnippet && !item.summary && !item.description) {
-                    console.log('CONTENT DEBUG - CNN feed item has no content fields, adding headline to enhancement options');
-                    if (!enhancedContent) enhancedContent = [];
-                    enhancedContent.push(`Headline: ${item.title}`);
-                  }
+                } catch (cnnError) {
+                  console.error('Error extracting CNN content:', cnnError);
                 }
               }
               
@@ -650,7 +602,7 @@ async function fetchLatestNews() {
               // Generate a basic content if nothing is available
               if (!content || content.length < 50) {
                 console.warn(`CONTENT DEBUG - No meaningful content available for "${item.title}". Generating minimal placeholder.`);
-                content = `News item from ${feed.name} with title "${item.title}". Published on ${item.pubDate || 'unknown date'}. Unfortunately, no detailed content was provided in the RSS feed. The AI-enhanced article will expand on this headline with relevant context and information.`;
+                content = `News item from ${feed.name} with title "${item.title}". Published on ${item.pubDate || 'unknown date'}. Unfortunately, no detailed content was provided in the RSS feed.`;
               }
               
               // Extract image if available
@@ -680,7 +632,7 @@ async function fetchLatestNews() {
                 image = item['itunes:image'].href;
               }
               // Look for image tag in content
-              else if (item.content) {
+              else if (typeof item.content === 'string' && item.content.includes('<img')) {
                 // First look for high-res or featured images
                 const featuredMatch = item.content.match(/<img[^>]+class="[^"]*(?:featured|main|hero|primary)[^"]*"[^>]+src="([^">]+)"/i);
                 if (featuredMatch && featuredMatch[1]) {
@@ -798,143 +750,171 @@ async function fetchLatestNews() {
   }
 }
 
-// Function to enhance news content with AI
-async function enhanceNewsContent(headline, newsSummary) {
+// Function to enhance news content using the Grid API
+async function enhanceNewsContent(newsItem) {
+  if (!newsItem) return null;
+  
+  console.log(`Enhancing content for "${newsItem.title}"...`);
+  
   try {
-    console.log(`Enhancing news content for headline: "${headline}"`);
-    console.log(`Original summary length: ${newsSummary.length} chars`);
+    // Check if content is minimal or basically just the headline
+    const contentLength = newsItem.content ? newsItem.content.length : 0;
+    const isMinimalContent = contentLength < 100 || 
+      (!newsItem.content) || 
+      (newsItem.title && newsItem.content === newsItem.title);
     
-    // Create a prompt that combines the headline and summary in our template
-    const prompt = NEWS_ENHANCEMENT_PROMPT
-      .replace('{{headline}}', headline)
-      .replace('{{source}}', '') // Source might not be available here
-      .replace('{{summary}}', newsSummary);
-    
-    // Submission for news enhancement
-    console.log(`Submitting request for news enhancement with a prompt of ${prompt.length} chars`);
-    
-    let generationId;
-    let successfulResponse = false;
-    
-    // First try with the specified model
-    try {
-      const requestBody = {
-        prompt: prompt,
-        params: {
-          max_length: 2500, // Increased from 2000 for longer articles
-          max_context_length: 8192,
-          temperature: 0.75,
-          rep_pen: 1.1,
-          top_p: 0.92,
-          top_k: 100,
-          stop_sequence: ["Ċ", "<|endoftext|>"]
-        },
-        models: [TEXT_MODEL],
-      };
-
-      console.log(`Using model: ${TEXT_MODEL}`);
-      const response = await axios.post(TEXT_GENERATION_ENDPOINT, requestBody, {
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': GRID_API_KEY,
-          'Client-Agent': 'GridNewsBot:1.0'
-        }
-      });
-
-      generationId = response.data.id;
-      console.log(`News enhancement request submitted with ID: ${generationId}`);
-      successfulResponse = true;
-    } catch (modelError) {
-      console.error(`Error with specified model ${TEXT_MODEL}:`, modelError.message);
-      successfulResponse = false;
+    if (isMinimalContent) {
+      console.log(`Skipping enhancement for minimal content (${contentLength} chars): "${newsItem.title}"`);
+      return newsItem.content || newsItem.title;
     }
     
-    // If the first attempt failed, try without specifying a model
-    if (!successfulResponse) {
-      try {
-        console.log('Trying fallback approach: Submitting request without specifying model');
-        
-        const fallbackRequestBody = {
-          prompt: prompt,
-          params: {
-            max_length: 2500,
-            max_context_length: 8192,
-            temperature: 0.75,
-            rep_pen: 1.1,
-            top_p: 0.92,
-            top_k: 100,
-            stop_sequence: ["Ċ", "<|endoftext|>"]
-          }
-          // No models specified - let the API choose
-        };
-        
-        const fallbackResponse = await axios.post(TEXT_GENERATION_ENDPOINT, fallbackRequestBody, {
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': GRID_API_KEY,
-            'Client-Agent': 'GridNewsBot:1.0'
-          }
-        });
-        
-        generationId = fallbackResponse.data.id;
-        console.log(`Fallback news enhancement request submitted with ID: ${generationId}`);
-        successfulResponse = true;
-      } catch (fallbackError) {
-        console.error('Error with fallback model request:', fallbackError.message);
-        return null;
+    const prompt = `You are a Discord news bot helping summarize and enhance news articles. 
+Rewrite the following article to be more engaging for a Discord audience. 
+Maintain accuracy, but make it more conversational and dramatic.
+Original headline: ${newsItem.title}
+Original article content: ${newsItem.content}
+`;
+
+    // Start generation
+    const response = await axios.post(`${GRID_API_URL}/text`, {
+      model: TEXT_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 2048,
+      temperature: 0.7,
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GRID_API_KEY}`
       }
-    }
-    
-    // If we got this far, we have a generation ID to poll
-    if (successfulResponse && generationId) {
-      // Poll for the results with an extended timeout (2 minutes)
-      const results = await pollForTextResults(generationId, 120);
+    });
+
+    if (response.data && response.data.generation_id) {
+      const generationId = response.data.generation_id;
+      console.log(`Generation started with ID: ${generationId}`);
       
-      if (results.text) {
-        // Process the text
-        const normalizedText = normalizeApiText(results.text);
-        console.log(`Enhanced article with ${normalizedText.length} chars`);
+      // Poll for completion (timeout after 2 minutes)
+      const startTime = Date.now();
+      const pollTimeoutMs = 120000; // 2 minutes
+      
+      while (Date.now() - startTime < pollTimeoutMs) {
+        // Wait between polls
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Cleaning up common formatting patterns
-        const cleanedText = normalizedText
-          .replace(/^Here's an enhanced version([\s\S]*?):\s*/i, '')
-          .replace(/^(as|when) requested\s*,?\s*/i, '')
-          .replace(/^i've rewritten the article([\s\S]*?):/i, '')
-          .replace(/^here's([\s\S]*?):/i, '')
-          .replace(/^article:?\s*/i, '');
+        try {
+          const pollResponse = await axios.get(`${GRID_API_URL}/text/generations/${generationId}`, {
+            headers: {
+              'Authorization': `Bearer ${GRID_API_KEY}`
+            }
+          });
           
-        // Check if we need to extract a title
-        let extractedTitle = headline;
-        let article = cleanedText;
+          if (pollResponse.data.status === 'done') {
+            console.log(`Content enhancement complete for "${newsItem.title}"`);
+            if (pollResponse.data.text) {
+              return pollResponse.data.text;
+            } else {
+              console.warn('No enhanced text returned despite completion status');
+              return newsItem.content;
+            }
+          } else if (pollResponse.data.status === 'error') {
+            console.error(`Error in content enhancement: ${pollResponse.data.error || 'Unknown error'}`);
+            return newsItem.content;
+          }
           
-        // Look for a title pattern at the beginning
-        const titleMatch = cleanedText.match(/^(?:#\s*)?([^\n]+?)(?:\n\n|\n--\n)/);
-        if (titleMatch) {
-          extractedTitle = titleMatch[1]
-            .replace(/^title:\s*/i, '')
-            .replace(/^#+\s*/, '')
-            .trim();
-          
-          // Remove the title from the article text
-          article = cleanedText.substring(titleMatch[0].length).trim();
+          // If still processing, continue polling
+          console.log(`Still waiting for content enhancement (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
+        } catch (pollError) {
+          console.error('Error polling for content enhancement:', pollError.message);
+          return newsItem.content;
         }
-        
-        // Return the enhanced content with extracted title
-        return {
-          title: extractedTitle, 
-          article: article
-        };
-      } else {
-        console.error('Text generation did not return any content');
-        return null;
       }
+      
+      console.warn(`Timed out waiting for content enhancement after ${pollTimeoutMs / 1000}s`);
+      return newsItem.content;
     } else {
-      console.error('Failed to get a valid generation ID');
-      return null;
+      console.error('No generation ID received from the API');
+      return newsItem.content;
     }
   } catch (error) {
-    console.error('Error enhancing news content:', error);
-    return null;
+    console.error('Error enhancing news content:', error.message);
+    
+    // Try with the fallback model if specified and different
+    if (FALLBACK_TEXT_MODEL && FALLBACK_TEXT_MODEL !== TEXT_MODEL) {
+      console.log(`Trying with fallback model ${FALLBACK_TEXT_MODEL}`);
+      try {
+        const prompt = `You are a Discord news bot helping summarize and enhance news articles. 
+Rewrite the following article to be more engaging for a Discord audience. 
+Maintain accuracy, but make it more conversational and dramatic.
+Original headline: ${newsItem.title}
+Original article content: ${newsItem.content}
+`;
+
+        // Start generation with fallback model
+        const response = await axios.post(`${GRID_API_URL}/text`, {
+          model: FALLBACK_TEXT_MODEL,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 1536,
+          temperature: 0.7,
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GRID_API_KEY}`
+          }
+        });
+
+        if (response.data && response.data.generation_id) {
+          const generationId = response.data.generation_id;
+          console.log(`Fallback generation started with ID: ${generationId}`);
+          
+          // Poll for completion (timeout after 2 minutes)
+          const startTime = Date.now();
+          const pollTimeoutMs = 120000; // 2 minutes
+          
+          while (Date.now() - startTime < pollTimeoutMs) {
+            // Wait between polls
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            try {
+              const pollResponse = await axios.get(`${GRID_API_URL}/text/generations/${generationId}`, {
+                headers: {
+                  'Authorization': `Bearer ${GRID_API_KEY}`
+                }
+              });
+              
+              if (pollResponse.data.status === 'done') {
+                console.log(`Fallback content enhancement complete for "${newsItem.title}"`);
+                if (pollResponse.data.text) {
+                  return pollResponse.data.text;
+                } else {
+                  console.warn('No enhanced text returned from fallback model despite completion status');
+                  return newsItem.content;
+                }
+              } else if (pollResponse.data.status === 'error') {
+                console.error(`Error in fallback content enhancement: ${pollResponse.data.error || 'Unknown error'}`);
+                return newsItem.content;
+              }
+              
+              // If still processing, continue polling
+              console.log(`Still waiting for fallback content enhancement (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
+            } catch (pollError) {
+              console.error('Error polling for fallback content enhancement:', pollError.message);
+              return newsItem.content;
+            }
+          }
+          
+          console.warn(`Timed out waiting for fallback content enhancement after ${pollTimeoutMs / 1000}s`);
+          return newsItem.content;
+        } else {
+          console.error('No generation ID received from the fallback API');
+          return newsItem.content;
+        }
+      } catch (fallbackError) {
+        console.error('Error with fallback enhancement:', fallbackError.message);
+        return newsItem.content;
+      }
+    } else {
+      // No fallback or fallback is the same as main model
+      return newsItem.content;
+    }
   }
 }
 
@@ -1245,202 +1225,301 @@ async function generateLlmAssistedImagePrompt(headline, articleSummary) {
   }
 }
 
-// Function to generate an image for a news headline
-async function generateNewsImage(headline, articleContent) {
+// Function to generate a news image using the API
+async function generateNewsImage(title, content) {
   try {
-    console.log(`Generating image for headline: "${headline}"`);
+    console.log(`Generating image for news item: "${title}"`);
     
-    // If articleContent is provided, use LLM to generate a better image prompt
-    let imagePrompt;
-    if (articleContent && LLM_ASSISTED_IMAGE_PROMPT_GENERATION) {
-      try {
-        // Create a summary if the article is too long
-        const summary = articleContent.length > 2000 
-          ? articleContent.substring(0, 2000) 
-          : articleContent;
-        
-        // Generate the prompt using LLM
-        imagePrompt = await generateLlmAssistedImagePrompt(headline, summary);
-        console.log(`Using LLM-assisted image prompt: "${imagePrompt}"`);
-      } catch (llmError) {
-        console.error('Error generating LLM-assisted image prompt:', llmError);
-        // Fall back to template-based prompt
-        imagePrompt = IMAGE_PROMPT_TEMPLATE.replace('{{headline}}', headline);
-        console.log(`Falling back to template-based image prompt: "${imagePrompt}"`);
-      }
-    } else {
-      // Use the template-based prompt if no article content or LLM assistance not configured
-      imagePrompt = IMAGE_PROMPT_TEMPLATE.replace('{{headline}}', headline);
-      console.log(`Using template-based image prompt: "${imagePrompt}"`);
-    }
+    // Create a prompt for image generation that summarizes the content
+    const prompt = `Create a photorealistic news image for the headline: ${title}. 
+The image should be eye-catching and appropriate for a news site, with high detail, realistic textures, and professional composition.
+Style: Photojournalistic, high definition news photography`;
     
-    // Start the image generation process
-    const response = await axios.post(IMAGE_GENERATION_ENDPOINT, {
-      prompt: imagePrompt,
-      models: [IMAGE_MODEL],
-      params: {
-        negative_prompt: "text, letters, words, font, writing, watermark, signature, logo, human hands",
-        guidance_scale: 7.5,
-        num_inference_steps: 30,
-        width: 1024,
-        height: 768
-      }
+    // Submit request to the API
+    const response = await axios.post(`${GRID_API_URL}/image`, {
+      model: IMAGE_MODEL,
+      prompt: prompt,
+      size: "1024x1024",
+      steps: 30,
     }, {
       headers: {
         'Content-Type': 'application/json',
-        'apikey': GRID_API_KEY,
-        'Client-Agent': 'GridNewsBot:1.0'
+        'Authorization': `Bearer ${GRID_API_KEY}`
       }
     });
     
-    // Get the ID directly from the API response
-    const imageId = response.data.id;
-    console.log(`Image generation request submitted with ID: ${imageId}`);
-    
-    if (!imageId) {
-      console.error('No image ID returned from generation API');
+    if (response.data && response.data.generation_id) {
+      const generationId = response.data.generation_id;
+      console.log(`Image generation started with ID: ${generationId}`);
+      
+      // Poll for completion (timeout after 2 minutes)
+      const startTime = Date.now();
+      const pollTimeoutMs = 120000; // 2 minutes
+      
+      while (Date.now() - startTime < pollTimeoutMs) {
+        // Wait between polls (longer wait for image generation)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        try {
+          const pollResponse = await axios.get(`${GRID_API_URL}/image/generations/${generationId}`, {
+            headers: {
+              'Authorization': `Bearer ${GRID_API_KEY}`
+            }
+          });
+          
+          if (pollResponse.data.status === 'done') {
+            console.log(`Image generation complete for "${title}"`);
+            // Return the direct URL to the image
+            if (pollResponse.data.images && pollResponse.data.images.length > 0) {
+              // Use the URL directly from the API response
+              const imageUrl = pollResponse.data.images[0].url;
+              console.log(`Generated image URL: ${imageUrl}`);
+              return imageUrl;
+            } else {
+              console.warn('No images returned despite completion status');
+              return null;
+            }
+          } else if (pollResponse.data.status === 'error') {
+            console.error(`Error in image generation: ${pollResponse.data.error || 'Unknown error'}`);
+            return null;
+          }
+          
+          // If still processing, continue polling
+          console.log(`Still waiting for image generation (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
+        } catch (pollError) {
+          console.error('Error polling for image generation:', pollError.message);
+          return null;
+        }
+      }
+      
+      console.warn(`Timed out waiting for image generation after ${pollTimeoutMs / 1000}s`);
       return null;
-    }
-    
-    // Start polling for the results to ensure generation completes
-    const imageResult = await pollForImageResults(imageId);
-    
-    // Check for errors
-    if (imageResult.error) {
-      console.error('Error in image generation result:', imageResult.error);
-      return null;
-    }
-    
-    // Just use the original URL from the API response
-    if (imageResult.generations && imageResult.generations.length > 0 && imageResult.generations[0].img) {
-      const imageUrl = imageResult.generations[0].img;
-      console.log(`Using direct image URL from API: ${imageUrl}`);
-      return imageUrl;
     } else {
-      console.error('No image URL found in successful generation');
+      console.error('No generation ID received from the API for image');
       return null;
     }
   } catch (error) {
-    console.error('Error generating image:', error);
-    return null;
+    console.error('Error generating news image:', error.message);
+    
+    // Try with the fallback model if specified and different
+    if (FALLBACK_IMAGE_MODEL && FALLBACK_IMAGE_MODEL !== IMAGE_MODEL) {
+      console.log(`Trying with fallback image model ${FALLBACK_IMAGE_MODEL}`);
+      try {
+        const prompt = `Create a photorealistic news image for the headline: ${title}. 
+The image should be eye-catching and appropriate for a news site, with high detail, realistic textures, and professional composition.
+Style: Photojournalistic, high definition news photography`;
+        
+        // Submit request to the API with fallback model
+        const response = await axios.post(`${GRID_API_URL}/image`, {
+          model: FALLBACK_IMAGE_MODEL,
+          prompt: prompt,
+          size: "1024x1024",
+          steps: 30,
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GRID_API_KEY}`
+          }
+        });
+        
+        if (response.data && response.data.generation_id) {
+          const generationId = response.data.generation_id;
+          console.log(`Fallback image generation started with ID: ${generationId}`);
+          
+          // Poll for completion (timeout after 2 minutes)
+          const startTime = Date.now();
+          const pollTimeoutMs = 120000; // 2 minutes
+          
+          while (Date.now() - startTime < pollTimeoutMs) {
+            // Wait between polls (longer wait for image generation)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            try {
+              const pollResponse = await axios.get(`${GRID_API_URL}/image/generations/${generationId}`, {
+                headers: {
+                  'Authorization': `Bearer ${GRID_API_KEY}`
+                }
+              });
+              
+              if (pollResponse.data.status === 'done') {
+                console.log(`Fallback image generation complete for "${title}"`);
+                // Return the direct URL to the image
+                if (pollResponse.data.images && pollResponse.data.images.length > 0) {
+                  // Use the URL directly from the API response
+                  const imageUrl = pollResponse.data.images[0].url;
+                  console.log(`Generated fallback image URL: ${imageUrl}`);
+                  return imageUrl;
+                } else {
+                  console.warn('No images returned from fallback despite completion status');
+                  return null;
+                }
+              } else if (pollResponse.data.status === 'error') {
+                console.error(`Error in fallback image generation: ${pollResponse.data.error || 'Unknown error'}`);
+                return null;
+              }
+              
+              // If still processing, continue polling
+              console.log(`Still waiting for fallback image generation (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
+            } catch (pollError) {
+              console.error('Error polling for fallback image generation:', pollError.message);
+              return null;
+            }
+          }
+          
+          console.warn(`Timed out waiting for fallback image generation after ${pollTimeoutMs / 1000}s`);
+          return null;
+        } else {
+          console.error('No generation ID received from the API for fallback image');
+          return null;
+        }
+      } catch (fallbackError) {
+        console.error('Error with fallback image generation:', fallbackError.message);
+        return null;
+      }
+    } else {
+      // No fallback model specified or same as main model
+      return null;
+    }
   }
 }
 
-// Helper function to download an image and return as a buffer
-async function downloadImage(url) {
+// Helper function to download an image from URL
+async function downloadImage(imageUrl) {
+  console.log(`Downloading image from: ${imageUrl}`);
   try {
-    console.log(`Downloading image from ${url}`);
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'GridNewsBot/1.0'
-      }
+    const response = await axios({
+      url: imageUrl,
+      method: 'GET',
+      responseType: 'arraybuffer'
     });
     
+    console.log(`Successfully downloaded image (${response.data.length} bytes)`);
     return Buffer.from(response.data, 'binary');
   } catch (error) {
-    console.error('Error downloading image:', error);
-    return null;
+    console.error(`Failed to download image from ${imageUrl}:`, error.message);
+    throw error;
   }
 }
 
-// Function to post the news to Discord
-async function postNewsToDiscord(newsItem, enhancedArticle) {
+// Function to post news to Discord
+async function postNewsToDiscord(title, content, link, source, pubDate, imageUrl) {
   try {
-    console.log(`Posting news to Discord: ${newsItem.title}`);
+    console.log(`Posting news to Discord: "${title}"`);
+    
+    // Get the channel
     const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
-
-    if (channel) {
+    if (!channel) {
+      console.error(`Could not find channel with ID ${NEWS_CHANNEL_ID}`);
+      return;
+    }
+    
+    // Format the timestamp from pubDate
+    let formattedDate = '';
+    try {
+      const dateObj = new Date(pubDate);
+      formattedDate = dateObj.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (dateError) {
+      console.warn(`Error formatting date ${pubDate}:`, dateError.message);
+      formattedDate = 'Recently';
+    }
+    
+    // Prepare image attachment if available
+    let imageAttachment = null;
+    if (imageUrl) {
       try {
-        // Check if we have a link or direct image
-        let imageUrl = newsItem.image;
-        let imageAttachment = null;
+        console.log(`Preparing to download and attach image from: ${imageUrl}`);
+        const imageBuffer = await downloadImage(imageUrl);
         
-        // If no image in the item or it's not valid, generate one
-        if (!imageUrl) {
-          console.log(`No image found in news item, generating one...`);
-          imageUrl = await generateNewsImage(newsItem.title, enhancedArticle.article);
-        }
-
-        // Download and prepare image attachment if URL exists
+        // Create a sanitized filename from the title
+        const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 20);
+        const imageExtension = imageUrl.split('.').pop().split('?')[0]; // Get file extension
+        const filename = `news_${sanitizedTitle}.${imageExtension || 'jpg'}`;
+        
+        imageAttachment = new Discord.AttachmentBuilder(imageBuffer, { name: filename });
+        console.log(`Image prepared as attachment: ${filename}`);
+      } catch (imgError) {
+        console.error(`Error downloading image for attachment:`, imgError.message);
+        console.log(`Falling back to image URL: ${imageUrl}`);
+        // If download fails, we'll include the URL in the embed
+      }
+    } else if (content && content.length > 100) {
+      // Generate an image if none provided but we have sufficient content
+      try {
+        console.log('No image URL provided, attempting to generate an image for the news');
+        imageUrl = await generateNewsImage(title, content);
+        
         if (imageUrl) {
+          console.log(`Successfully generated image at: ${imageUrl}`);
           try {
-            console.log(`Downloading image from ${imageUrl} for Discord attachment`);
             const imageBuffer = await downloadImage(imageUrl);
             
-            if (imageBuffer) {
-              // Create a Discord attachment with a meaningful filename
-              const safeFilename = newsItem.title
-                .replace(/[^a-z0-9]/gi, '_')
-                .toLowerCase()
-                .substring(0, 20);
-              
-              imageAttachment = {
-                attachment: imageBuffer,
-                name: `${safeFilename}_news_image.jpg`
-              };
-              
-              console.log(`Successfully prepared image attachment for Discord`);
-            } else {
-              console.error(`Failed to download image from ${imageUrl}`);
-            }
-          } catch (imageError) {
-            console.error(`Error preparing image attachment: ${imageError.message}`);
+            // Create a sanitized filename from the title
+            const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 20);
+            imageAttachment = new Discord.AttachmentBuilder(imageBuffer, { name: `news_${sanitizedTitle}.jpg` });
+            console.log('Generated image prepared as attachment');
+          } catch (downloadError) {
+            console.error(`Error downloading generated image:`, downloadError.message);
+            console.log(`Will use image URL in embed: ${imageUrl}`);
           }
         }
-
-        // Create the embed for Discord
-        const embed = new EmbedBuilder()
-          .setColor(0x0099FF)
-          .setTitle(enhancedArticle.title)
-          .setURL(newsItem.link || 'https://aipowergrid.io/')
-          .setDescription(enhancedArticle.article.substring(0, 4000) + (enhancedArticle.article.length > 4000 ? '...' : ''))
-          .addFields(
-            { name: 'Source', value: newsItem.source, inline: true },
-            { name: 'Published', value: new Date(newsItem.pubDate).toLocaleString(), inline: true }
-          )
-          .setFooter({ text: 'Generated by AI Power Grid • News Bot' });
-        
-        // If we have the image as attachment, don't set it in the embed
-        if (imageUrl && !imageAttachment) {
-          embed.setImage(imageUrl);
-        }
-
-        // Create a Discord message with appropriate components
-        const messageOptions = {
-          embeds: [embed]
-        };
-        
-        // Add the image attachment if we have it
-        if (imageAttachment) {
-          messageOptions.files = [imageAttachment];
-        }
-
-        // Send the message
-        await channel.send(messageOptions);
-        console.log('News posted to Discord successfully');
-
-        // Store the article for context in user interactions
-        storeRecentArticle({
-          headline: newsItem.title,
-          article: enhancedArticle.article, // Use the enhanced article content
-          source: newsItem.source,
-          link: newsItem.link
-        });
-
-        // If the article has a link, make sure it's in our posted URLs set
-        if (newsItem.link) {
-          postedArticleUrls.add(newsItem.link);
-        }
-
-      } catch (error) {
-        console.error('Error sending message to Discord:', error);
+      } catch (genError) {
+        console.error('Error generating news image:', genError.message);
       }
-    } else {
-      console.error(`Could not find channel with ID ${NEWS_CHANNEL_ID}`);
     }
+    
+    // Build the embed
+    const embed = new Discord.EmbedBuilder()
+      .setColor('#0099ff')
+      .setTitle(title)
+      .setURL(link)
+      .setDescription(content.length > 4000 ? content.substring(0, 4000) + '...' : content)
+      .setTimestamp()
+      .setFooter({ text: `Source: ${source} • Published: ${formattedDate}` });
+    
+    // Add image to embed if we have it as an attachment or URL
+    if (imageAttachment) {
+      embed.setImage(`attachment://${imageAttachment.name}`);
+    } else if (imageUrl) {
+      embed.setImage(imageUrl);
+    }
+    
+    // Send the message with embed
+    const messageOptions = {
+      embeds: [embed]
+    };
+    
+    // Add image attachment if we have one
+    if (imageAttachment) {
+      messageOptions.files = [imageAttachment];
+    }
+    
+    await channel.send(messageOptions);
+    console.log('News successfully posted to Discord');
   } catch (error) {
-    console.error('Error posting to Discord:', error);
+    console.error('Error posting to Discord:', error.message);
+    
+    // Simplified fallback attempt if the embed fails
+    try {
+      const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+      if (!channel) return;
+      
+      // Prepare a simple text post without embeds
+      let simpleMessage = `**${title}**\n\n`;
+      simpleMessage += content.length > 1500 ? content.substring(0, 1500) + '...' : content;
+      simpleMessage += `\n\n*Source: ${source}*`;
+      if (link) simpleMessage += `\n${link}`;
+      
+      await channel.send({ content: simpleMessage });
+      console.log('Sent fallback simple message after embed failure');
+    } catch (fallbackError) {
+      console.error('Critical error: Both embed and fallback posting failed:', fallbackError);
+    }
   }
 }
 
