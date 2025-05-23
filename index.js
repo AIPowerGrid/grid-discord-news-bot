@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
 const axios = require('axios');
 const Parser = require('rss-parser');
 const { decode } = require('html-entities');
@@ -55,6 +55,8 @@ const GRID_API_KEY = process.env.GRID_API_KEY;
 const UPDATE_FREQUENCY = parseInt(process.env.UPDATE_FREQUENCY || '60', 10); // Default to 60 minutes
 const TEXT_MODEL = process.env.TEXT_MODEL || 'grid/llama-3.1-8b-instant';
 const IMAGE_MODEL = process.env.IMAGE_MODEL || 'Flux.1-Schnell fp8 (Compact)'; // Default image model
+const FALLBACK_TEXT_MODEL = process.env.FALLBACK_TEXT_MODEL || TEXT_MODEL; // Default to same as TEXT_MODEL
+const FALLBACK_IMAGE_MODEL = process.env.FALLBACK_IMAGE_MODEL || IMAGE_MODEL; // Default to same as IMAGE_MODEL
 
 // Feature toggles
 const ENABLE_POLLS = process.env.ENABLE_POLLS?.toLowerCase() === 'true';
@@ -87,6 +89,7 @@ const TEXT_GENERATION_ENDPOINT = 'https://api.aipowergrid.io/api/v2/generate/tex
 const TEXT_GENERATION_STATUS_ENDPOINT = 'https://api.aipowergrid.io/api/v2/generate/text/status';
 const IMAGE_GENERATION_ENDPOINT = 'https://api.aipowergrid.io/api/v2/generate/async';
 const IMAGE_GENERATION_STATUS_ENDPOINT = 'https://api.aipowergrid.io/api/v2/generate/status';
+const GRID_API_URL = 'https://api.aipowergrid.io/api/v2';
 
 // Keep track of recently posted news to answer questions about them
 const recentNewsArticles = [];
@@ -776,60 +779,35 @@ Original article content: ${newsItem.content}
 `;
 
     // Start generation
-    const response = await axios.post(`${GRID_API_URL}/text`, {
-      model: TEXT_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2048,
-      temperature: 0.7,
+    const response = await axios.post(TEXT_GENERATION_ENDPOINT, {
+      prompt: prompt,
+      params: {
+        max_length: 2048,
+        temperature: 0.7,
+      },
+      models: [TEXT_MODEL]
     }, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GRID_API_KEY}`
+        'apikey': GRID_API_KEY,
+        'Client-Agent': 'GridNewsBot:1.0'
       }
     });
 
-    if (response.data && response.data.generation_id) {
-      const generationId = response.data.generation_id;
+    if (response.data && response.data.id) {
+      const generationId = response.data.id;
       console.log(`Generation started with ID: ${generationId}`);
       
-      // Poll for completion (timeout after 2 minutes)
-      const startTime = Date.now();
-      const pollTimeoutMs = 120000; // 2 minutes
+      // Poll for results using our existing function
+      const results = await pollForTextResults(generationId, 120);
       
-      while (Date.now() - startTime < pollTimeoutMs) {
-        // Wait between polls
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        try {
-          const pollResponse = await axios.get(`${GRID_API_URL}/text/generations/${generationId}`, {
-            headers: {
-              'Authorization': `Bearer ${GRID_API_KEY}`
-            }
-          });
-          
-          if (pollResponse.data.status === 'done') {
-            console.log(`Content enhancement complete for "${newsItem.title}"`);
-            if (pollResponse.data.text) {
-              return pollResponse.data.text;
-            } else {
-              console.warn('No enhanced text returned despite completion status');
-              return newsItem.content;
-            }
-          } else if (pollResponse.data.status === 'error') {
-            console.error(`Error in content enhancement: ${pollResponse.data.error || 'Unknown error'}`);
-            return newsItem.content;
-          }
-          
-          // If still processing, continue polling
-          console.log(`Still waiting for content enhancement (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
-        } catch (pollError) {
-          console.error('Error polling for content enhancement:', pollError.message);
-          return newsItem.content;
-        }
+      if (results && results.done && results.text) {
+        console.log(`Content enhancement complete for "${newsItem.title}"`);
+        return results.text;
+      } else {
+        console.warn('No enhanced text returned or process failed:', results?.error || 'Unknown error');
+        return newsItem.content;
       }
-      
-      console.warn(`Timed out waiting for content enhancement after ${pollTimeoutMs / 1000}s`);
-      return newsItem.content;
     } else {
       console.error('No generation ID received from the API');
       return newsItem.content;
@@ -849,60 +827,35 @@ Original article content: ${newsItem.content}
 `;
 
         // Start generation with fallback model
-        const response = await axios.post(`${GRID_API_URL}/text`, {
-          model: FALLBACK_TEXT_MODEL,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 1536,
-          temperature: 0.7,
+        const response = await axios.post(TEXT_GENERATION_ENDPOINT, {
+          prompt: prompt,
+          params: {
+            max_length: 1536,
+            temperature: 0.7,
+          },
+          models: [FALLBACK_TEXT_MODEL]
         }, {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${GRID_API_KEY}`
+            'apikey': GRID_API_KEY,
+            'Client-Agent': 'GridNewsBot:1.0'
           }
         });
 
-        if (response.data && response.data.generation_id) {
-          const generationId = response.data.generation_id;
+        if (response.data && response.data.id) {
+          const generationId = response.data.id;
           console.log(`Fallback generation started with ID: ${generationId}`);
           
-          // Poll for completion (timeout after 2 minutes)
-          const startTime = Date.now();
-          const pollTimeoutMs = 120000; // 2 minutes
+          // Poll for results using our existing function
+          const results = await pollForTextResults(generationId, 120);
           
-          while (Date.now() - startTime < pollTimeoutMs) {
-            // Wait between polls
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            try {
-              const pollResponse = await axios.get(`${GRID_API_URL}/text/generations/${generationId}`, {
-                headers: {
-                  'Authorization': `Bearer ${GRID_API_KEY}`
-                }
-              });
-              
-              if (pollResponse.data.status === 'done') {
-                console.log(`Fallback content enhancement complete for "${newsItem.title}"`);
-                if (pollResponse.data.text) {
-                  return pollResponse.data.text;
-                } else {
-                  console.warn('No enhanced text returned from fallback model despite completion status');
-                  return newsItem.content;
-                }
-              } else if (pollResponse.data.status === 'error') {
-                console.error(`Error in fallback content enhancement: ${pollResponse.data.error || 'Unknown error'}`);
-                return newsItem.content;
-              }
-              
-              // If still processing, continue polling
-              console.log(`Still waiting for fallback content enhancement (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
-            } catch (pollError) {
-              console.error('Error polling for fallback content enhancement:', pollError.message);
-              return newsItem.content;
-            }
+          if (results && results.done && results.text) {
+            console.log(`Fallback content enhancement complete for "${newsItem.title}"`);
+            return results.text;
+          } else {
+            console.warn('No enhanced text returned from fallback model or process failed:', results?.error || 'Unknown error');
+            return newsItem.content;
           }
-          
-          console.warn(`Timed out waiting for fallback content enhancement after ${pollTimeoutMs / 1000}s`);
-          return newsItem.content;
         } else {
           console.error('No generation ID received from the fallback API');
           return newsItem.content;
@@ -1236,64 +1189,41 @@ The image should be eye-catching and appropriate for a news site, with high deta
 Style: Photojournalistic, high definition news photography`;
     
     // Submit request to the API
-    const response = await axios.post(`${GRID_API_URL}/image`, {
-      model: IMAGE_MODEL,
+    const response = await axios.post(IMAGE_GENERATION_ENDPOINT, {
       prompt: prompt,
       size: "1024x1024",
       steps: 30,
+      models: [IMAGE_MODEL]
     }, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GRID_API_KEY}`
+        'apikey': GRID_API_KEY,
+        'Client-Agent': 'GridNewsBot:1.0'
       }
     });
     
-    if (response.data && response.data.generation_id) {
-      const generationId = response.data.generation_id;
+    if (response.data && response.data.id) {
+      const generationId = response.data.id;
       console.log(`Image generation started with ID: ${generationId}`);
       
-      // Poll for completion (timeout after 2 minutes)
-      const startTime = Date.now();
-      const pollTimeoutMs = 120000; // 2 minutes
+      // Poll for results using our existing pollForImageResults function
+      const results = await pollForImageResults(generationId);
       
-      while (Date.now() - startTime < pollTimeoutMs) {
-        // Wait between polls (longer wait for image generation)
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        try {
-          const pollResponse = await axios.get(`${GRID_API_URL}/image/generations/${generationId}`, {
-            headers: {
-              'Authorization': `Bearer ${GRID_API_KEY}`
-            }
-          });
-          
-          if (pollResponse.data.status === 'done') {
-            console.log(`Image generation complete for "${title}"`);
-            // Return the direct URL to the image
-            if (pollResponse.data.images && pollResponse.data.images.length > 0) {
-              // Use the URL directly from the API response
-              const imageUrl = pollResponse.data.images[0].url;
-              console.log(`Generated image URL: ${imageUrl}`);
-              return imageUrl;
-            } else {
-              console.warn('No images returned despite completion status');
-              return null;
-            }
-          } else if (pollResponse.data.status === 'error') {
-            console.error(`Error in image generation: ${pollResponse.data.error || 'Unknown error'}`);
-            return null;
-          }
-          
-          // If still processing, continue polling
-          console.log(`Still waiting for image generation (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
-        } catch (pollError) {
-          console.error('Error polling for image generation:', pollError.message);
+      if (results && !results.error) {
+        // Check if we have a generations array with an image URL
+        if (results.generations && results.generations.length > 0) {
+          // Use permanent_img if available, otherwise use the standard img URL
+          const imageUrl = results.generations[0].permanent_img || results.generations[0].img;
+          console.log(`Generated image URL: ${imageUrl}`);
+          return imageUrl;
+        } else {
+          console.warn('No image URL found in successful response');
           return null;
         }
+      } else {
+        console.error('Image generation failed or timed out:', results?.error || 'Unknown error');
+        return null;
       }
-      
-      console.warn(`Timed out waiting for image generation after ${pollTimeoutMs / 1000}s`);
-      return null;
     } else {
       console.error('No generation ID received from the API for image');
       return null;
@@ -1310,64 +1240,41 @@ The image should be eye-catching and appropriate for a news site, with high deta
 Style: Photojournalistic, high definition news photography`;
         
         // Submit request to the API with fallback model
-        const response = await axios.post(`${GRID_API_URL}/image`, {
-          model: FALLBACK_IMAGE_MODEL,
+        const response = await axios.post(IMAGE_GENERATION_ENDPOINT, {
           prompt: prompt,
           size: "1024x1024",
           steps: 30,
+          models: [FALLBACK_IMAGE_MODEL]
         }, {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${GRID_API_KEY}`
+            'apikey': GRID_API_KEY,
+            'Client-Agent': 'GridNewsBot:1.0'
           }
         });
         
-        if (response.data && response.data.generation_id) {
-          const generationId = response.data.generation_id;
+        if (response.data && response.data.id) {
+          const generationId = response.data.id;
           console.log(`Fallback image generation started with ID: ${generationId}`);
           
-          // Poll for completion (timeout after 2 minutes)
-          const startTime = Date.now();
-          const pollTimeoutMs = 120000; // 2 minutes
+          // Poll for results
+          const results = await pollForImageResults(generationId);
           
-          while (Date.now() - startTime < pollTimeoutMs) {
-            // Wait between polls (longer wait for image generation)
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            try {
-              const pollResponse = await axios.get(`${GRID_API_URL}/image/generations/${generationId}`, {
-                headers: {
-                  'Authorization': `Bearer ${GRID_API_KEY}`
-                }
-              });
-              
-              if (pollResponse.data.status === 'done') {
-                console.log(`Fallback image generation complete for "${title}"`);
-                // Return the direct URL to the image
-                if (pollResponse.data.images && pollResponse.data.images.length > 0) {
-                  // Use the URL directly from the API response
-                  const imageUrl = pollResponse.data.images[0].url;
-                  console.log(`Generated fallback image URL: ${imageUrl}`);
-                  return imageUrl;
-                } else {
-                  console.warn('No images returned from fallback despite completion status');
-                  return null;
-                }
-              } else if (pollResponse.data.status === 'error') {
-                console.error(`Error in fallback image generation: ${pollResponse.data.error || 'Unknown error'}`);
-                return null;
-              }
-              
-              // If still processing, continue polling
-              console.log(`Still waiting for fallback image generation (${Math.round((Date.now() - startTime) / 1000)}s elapsed)...`);
-            } catch (pollError) {
-              console.error('Error polling for fallback image generation:', pollError.message);
+          if (results && !results.error) {
+            // Check if we have a generations array with an image URL
+            if (results.generations && results.generations.length > 0) {
+              // Use permanent_img if available, otherwise use the standard img URL
+              const imageUrl = results.generations[0].permanent_img || results.generations[0].img;
+              console.log(`Generated fallback image URL: ${imageUrl}`);
+              return imageUrl;
+            } else {
+              console.warn('No image URL found in successful fallback response');
               return null;
             }
+          } else {
+            console.error('Fallback image generation failed or timed out:', results?.error || 'Unknown error');
+            return null;
           }
-          
-          console.warn(`Timed out waiting for fallback image generation after ${pollTimeoutMs / 1000}s`);
-          return null;
         } else {
           console.error('No generation ID received from the API for fallback image');
           return null;
@@ -1441,7 +1348,7 @@ async function postNewsToDiscord(title, content, link, source, pubDate, imageUrl
         const imageExtension = imageUrl.split('.').pop().split('?')[0]; // Get file extension
         const filename = `news_${sanitizedTitle}.${imageExtension || 'jpg'}`;
         
-        imageAttachment = new Discord.AttachmentBuilder(imageBuffer, { name: filename });
+        imageAttachment = new AttachmentBuilder(imageBuffer, { name: filename });
         console.log(`Image prepared as attachment: ${filename}`);
       } catch (imgError) {
         console.error(`Error downloading image for attachment:`, imgError.message);
@@ -1461,7 +1368,7 @@ async function postNewsToDiscord(title, content, link, source, pubDate, imageUrl
             
             // Create a sanitized filename from the title
             const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 20);
-            imageAttachment = new Discord.AttachmentBuilder(imageBuffer, { name: `news_${sanitizedTitle}.jpg` });
+            imageAttachment = new AttachmentBuilder(imageBuffer, { name: `news_${sanitizedTitle}.jpg` });
             console.log('Generated image prepared as attachment');
           } catch (downloadError) {
             console.error(`Error downloading generated image:`, downloadError.message);
