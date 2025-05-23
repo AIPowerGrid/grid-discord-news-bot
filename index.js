@@ -399,146 +399,6 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Handle messages to allow users to interact with the bot
-client.on('messageCreate', async (message) => {
-  // Ignore messages from bots to prevent potential loops
-  if (message.author.bot) return;
-  
-  // Check if the message is in the designated news channel, is a DM, or mentions the bot directly
-  const isDM = message.channel.type === 'DM';
-  const isDirectMention = message.mentions.has(client.user);
-  const isNewsChannel = message.channel.id === NEWS_CHANNEL_ID;
-  
-  // Respond to messages in the news channel, DMs, or when mentioned directly
-  if (isDM || isDirectMention || isNewsChannel) {
-    // Remove the bot mention from the message content if present
-    const content = message.content.replace(new RegExp(`<@!?${client.user.id}>`), '').trim();
-    
-    // Skip empty messages
-    if (!content) return;
-    
-    // Store this message in the user's history
-    const userId = message.author.id;
-    if (!userMessageHistory[userId]) {
-      userMessageHistory[userId] = [];
-    }
-    
-    // Add the new message to the history
-    userMessageHistory[userId].unshift({
-      content: content,
-      timestamp: Date.now()
-    });
-    
-    // Only keep up to MAX_MESSAGE_HISTORY messages
-    if (userMessageHistory[userId].length > MAX_MESSAGE_HISTORY) {
-      userMessageHistory[userId].pop();
-    }
-    
-    // Process image generation requests
-    if (content.toLowerCase().includes('generate an image') || 
-        content.toLowerCase().includes('create an image') ||
-        content.toLowerCase().includes('make an image')) {
-      try {
-        // Start typing indicator
-        message.channel.sendTyping();
-        
-        // Extract a potential topic from the message
-        let topic = content.replace(/generate an image|create an image|make an image/gi, '').trim();
-        
-        // If no specific topic provided, use the most recent news headline
-        if (!topic && recentNewsArticles.length > 0) {
-          topic = recentNewsArticles[0].headline;
-        } else if (!topic) {
-          // Default topic if no recent news and no specified topic
-          topic = "Breaking news headline";
-        }
-        
-        // Reply that we're generating the image
-        await message.reply(`Generating an image for: "${topic}". This might take a minute...`);
-        
-        // Generate the image
-        const imageUrl = await generateNewsImage(topic);
-        
-        if (imageUrl) {
-          // Send a regular message with the image URL and disclaimer
-          await message.channel.send(`Generated image for: "${topic}"\n${imageUrl}\n\n**DISCLAIMER: This image is AI-generated and fictional. It does not represent real events or people.**`);
-        } else {
-          await message.reply("Sorry, I wasn't able to generate that image. Please try again later.");
-        }
-        return;
-      } catch (error) {
-        console.error('Error generating image for user:', error);
-        await message.reply("Sorry, I encountered an error while generating the image.");
-        return;
-      }
-    }
-    
-    // Handle all other messages (questions, etc.)
-    try {
-      console.log(`Responding to message: ${content}`);
-      
-      // Start typing indicator before generating response
-      message.channel.sendTyping();
-      
-      // Generate a response about recent news using AI, passing the user ID for context
-      const response = await generateNewsResponse(content, recentNewsArticles, userId);
-      
-      // Check if the response needs to be split due to Discord's message limit (2000 chars)
-      if (response.length <= 1900) {
-        // Send as a single message
-        await message.reply(response);
-      } else {
-        // Split the response into parts of approximately 1900 characters
-        const parts = [];
-        let remainingText = response;
-        
-        while (remainingText.length > 0) {
-          // Find a good breaking point (end of sentence) within the limit
-          let breakPoint = 1900;
-          if (remainingText.length > 1900) {
-            // Try to find the last period + space before the limit
-            const lastPeriod = remainingText.substring(0, 1900).lastIndexOf('. ');
-            if (lastPeriod > 1000) { // Only break at a period if it's not too short
-              breakPoint = lastPeriod + 1; // Include the period but not the space
-            }
-          }
-          
-          // Add this part to our parts array
-          parts.push(remainingText.substring(0, breakPoint));
-          
-          // Remove this part from the remaining text
-          remainingText = remainingText.substring(breakPoint).trim();
-        }
-        
-        // Send each part as a separate message
-        for (let i = 0; i < parts.length; i++) {
-          // Show typing indicator between sending parts to simulate typing pause
-          if (i > 0) message.channel.sendTyping();
-          
-          const prefix = (i === 0) ? '' : '(continued) ';
-          
-          // Use message.channel.send instead of message.reply for follow-up messages
-          if (i === 0) {
-            await message.reply(`${parts[i]}`);
-          } else {
-            await message.channel.send(`${prefix}${parts[i]}`);
-          }
-          
-          // Wait a short period between sending parts to make it feel more natural
-          if (i < parts.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error responding to user:', error.message);
-      // Add more details to the error log to help with debugging
-      if (error.stack) console.error(error.stack);
-      await message.reply('Sorry, I encountered an error while processing your request.');
-    }
-  }
-});
-
 // Function to schedule regular news updates
 function scheduleNewsUpdates() {
   console.log(`Scheduling news updates every ${UPDATE_FREQUENCY} minutes`);
@@ -1373,13 +1233,136 @@ async function generateNewsImage(headline, articleContent) {
       return null;
     }
     
-    // Just use the permanent URL format directly with the ID from the initial response
-    const permanentUrl = `https://images.aipg.art/${imageId}.webp`;
-    console.log(`Using permanent image URL: ${permanentUrl}`);
-    return permanentUrl;
+    // Just use the original URL from the API response
+    if (imageResult.generations && imageResult.generations.length > 0 && imageResult.generations[0].img) {
+      const imageUrl = imageResult.generations[0].img;
+      console.log(`Using direct image URL from API: ${imageUrl}`);
+      return imageUrl;
+    } else {
+      console.error('No image URL found in successful generation');
+      return null;
+    }
   } catch (error) {
     console.error('Error generating image:', error);
     return null;
+  }
+}
+
+// Helper function to download an image and return as a buffer
+async function downloadImage(url) {
+  try {
+    console.log(`Downloading image from ${url}`);
+    const response = await axios.get(url, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'GridNewsBot/1.0'
+      }
+    });
+    
+    return Buffer.from(response.data, 'binary');
+  } catch (error) {
+    console.error('Error downloading image:', error);
+    return null;
+  }
+}
+
+// Function to post the news to Discord
+async function postNewsToDiscord(newsItem, enhancedArticle) {
+  try {
+    console.log(`Posting news to Discord: ${newsItem.title}`);
+    const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+
+    if (channel) {
+      try {
+        // Check if we have a link or direct image
+        let imageUrl = newsItem.image;
+        let imageAttachment = null;
+        
+        // If no image in the item or it's not valid, generate one
+        if (!imageUrl) {
+          console.log(`No image found in news item, generating one...`);
+          imageUrl = await generateNewsImage(newsItem.title, enhancedArticle.article);
+        }
+
+        // Download and prepare image attachment if URL exists
+        if (imageUrl) {
+          try {
+            console.log(`Downloading image from ${imageUrl} for Discord attachment`);
+            const imageBuffer = await downloadImage(imageUrl);
+            
+            if (imageBuffer) {
+              // Create a Discord attachment with a meaningful filename
+              const safeFilename = newsItem.title
+                .replace(/[^a-z0-9]/gi, '_')
+                .toLowerCase()
+                .substring(0, 20);
+              
+              imageAttachment = {
+                attachment: imageBuffer,
+                name: `${safeFilename}_news_image.jpg`
+              };
+              
+              console.log(`Successfully prepared image attachment for Discord`);
+            } else {
+              console.error(`Failed to download image from ${imageUrl}`);
+            }
+          } catch (imageError) {
+            console.error(`Error preparing image attachment: ${imageError.message}`);
+          }
+        }
+
+        // Create the embed for Discord
+        const embed = new EmbedBuilder()
+          .setColor(0x0099FF)
+          .setTitle(enhancedArticle.title)
+          .setURL(newsItem.link || 'https://aipowergrid.io/')
+          .setDescription(enhancedArticle.article.substring(0, 4000) + (enhancedArticle.article.length > 4000 ? '...' : ''))
+          .addFields(
+            { name: 'Source', value: newsItem.source, inline: true },
+            { name: 'Published', value: new Date(newsItem.pubDate).toLocaleString(), inline: true }
+          )
+          .setFooter({ text: 'Generated by AI Power Grid • News Bot' });
+        
+        // If we have the image as attachment, don't set it in the embed
+        if (imageUrl && !imageAttachment) {
+          embed.setImage(imageUrl);
+        }
+
+        // Create a Discord message with appropriate components
+        const messageOptions = {
+          embeds: [embed]
+        };
+        
+        // Add the image attachment if we have it
+        if (imageAttachment) {
+          messageOptions.files = [imageAttachment];
+        }
+
+        // Send the message
+        await channel.send(messageOptions);
+        console.log('News posted to Discord successfully');
+
+        // Store the article for context in user interactions
+        storeRecentArticle({
+          headline: newsItem.title,
+          article: enhancedArticle.article, // Use the enhanced article content
+          source: newsItem.source,
+          link: newsItem.link
+        });
+
+        // If the article has a link, make sure it's in our posted URLs set
+        if (newsItem.link) {
+          postedArticleUrls.add(newsItem.link);
+        }
+
+      } catch (error) {
+        console.error('Error sending message to Discord:', error);
+      }
+    } else {
+      console.error(`Could not find channel with ID ${NEWS_CHANNEL_ID}`);
+    }
+  } catch (error) {
+    console.error('Error posting to Discord:', error);
   }
 }
 
@@ -1533,232 +1516,171 @@ async function createDiscordPoll(topic, options) {
   }
 }
 
-// Function to post the news to Discord
-async function postNewsToDiscord(newsItem, enhancedArticle) {
-  try {
-    console.log(`Posting news to Discord: ${newsItem.title}`);
-    const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
-
-    // Validate and fix article image URL if present
-    let imageUrl = newsItem.image;
-    if (imageUrl) {
-      // Log the original image URL
-      console.log(`IMAGE DEBUG - Original article image URL: '${imageUrl}'`);
-      
-      // Check if URL is valid and has an image extension
-      const isValidImageUrl = imageUrl && 
-        (imageUrl.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i) || 
-         imageUrl.includes('image') ||
-         imageUrl.includes('media'));
-      
-      if (!isValidImageUrl) {
-        console.warn(`IMAGE DEBUG - Article image URL doesn't appear to be a direct image link: ${imageUrl}`);
-        imageUrl = null; // Reset so we generate an image instead
-      } else {
-        // Strip any query parameters that might be causing issues
-        if (imageUrl.includes('?')) {
-          const cleanedUrl = imageUrl.split('?')[0];
-          console.log(`IMAGE DEBUG - Cleaned image URL: ${cleanedUrl}`);
-          imageUrl = cleanedUrl;
-        }
-      }
+// Add back the messageCreate event handler
+client.on('messageCreate', async (message) => {
+  // Ignore messages from bots to prevent potential loops
+  if (message.author.bot) return;
+  
+  // Check if the message is in the designated news channel, is a DM, or mentions the bot directly
+  const isDM = message.channel.type === 'DM';
+  const isDirectMention = message.mentions.has(client.user);
+  const isNewsChannel = message.channel.id === NEWS_CHANNEL_ID;
+  
+  // Respond to messages in the news channel, DMs, or when mentioned directly
+  if (isDM || isDirectMention || isNewsChannel) {
+    // Remove the bot mention from the message content if present
+    const content = message.content.replace(new RegExp(`<@!?${client.user.id}>`), '').trim();
+    
+    // Skip empty messages
+    if (!content) return;
+    
+    // Store this message in the user's history
+    const userId = message.author.id;
+    if (!userMessageHistory[userId]) {
+      userMessageHistory[userId] = [];
     }
     
-    // Generate an image if we don't have a valid one
-    if (!imageUrl) {
-      console.log('No valid image in article, generating one...');
-      // Pass the enhanced article content to generateNewsImage for better context
-      imageUrl = await generateNewsImage(newsItem.title, enhancedArticle.article);
+    // Add the new message to the history
+    userMessageHistory[userId].unshift({
+      content: content,
+      timestamp: Date.now()
+    });
+    
+    // Only keep up to MAX_MESSAGE_HISTORY messages
+    if (userMessageHistory[userId].length > MAX_MESSAGE_HISTORY) {
+      userMessageHistory[userId].pop();
     }
-
-    console.log(`IMAGE DEBUG - Final image URL for Discord embed: '${imageUrl}'`);
     
-    const embed = new EmbedBuilder()
-      .setColor(0x3498db) // Blue color
-      .setTitle(newsItem.title)
-      .setURL(newsItem.link) // Add the URL to the title
-      .setTimestamp()
-      .setFooter({
-        text: 'News powered by AI Power Grid | ' + newsItem.source
-      });
-    
-    // Process article content for Discord
-    // Discord has a 4096 character limit on embed descriptions
-    // We'll use 3000 to give more room for formatting and ensure we don't hit the limit
-    const maxLength = 3000;
-    let articleContent = enhancedArticle.article || '';
-    
-    console.log(`CONTENT DEBUG - Using max length: ${maxLength}, current length: ${articleContent.length} chars`);
-    
-    // Final emergency check to ensure we're not posting just a title or empty content
-    if (articleContent.length < 100 || 
-        articleContent.trim() === newsItem.title.trim() ||
-        articleContent.trim() === `**${newsItem.title.trim()}**` ||
-        articleContent.toLowerCase().includes("placeholder article") ||
-        articleContent.toLowerCase().includes("since there is no provided content") ||
-        articleContent.toLowerCase().includes("i will create an article") ||
-        articleContent.toLowerCase().includes("no content was provided") ||
-        articleContent.toLowerCase().includes("this article will not contain")) {
+    // Process image generation requests
+    if (content.toLowerCase().includes('generate an image') || 
+        content.toLowerCase().includes('create an image') ||
+        content.toLowerCase().includes('make an image')) {
+      try {
+        // Start typing indicator
+        message.channel.sendTyping();
         
-      console.warn("CRITICAL: About to post with very short content or placeholder text. Adding emergency fallback text.");
-      // Add emergency fallback content
-      articleContent = `In recent developments, ${newsItem.title}. ${newsItem.content || ""}
-
-The news has drawn significant attention from experts in the field, who note that these developments could have far-reaching implications. Political analysts and industry observers are closely monitoring the situation as it continues to unfold.
-
-According to initial reports, the events described in the headline represent an important development that may influence both public opinion and policy decisions in the coming weeks. Stakeholders from various sectors have begun to respond, with some expressing support while others raise concerns about potential long-term consequences.
-
-Members of the public have also weighed in on social media platforms, with reactions ranging from support to concern. Community leaders have called for open dialogue and transparent communication as the situation develops.
-
-As more information becomes available, authorities are expected to provide additional details and potentially announce next steps. The full impact of these developments remains to be seen, but analysts suggest that we may witness significant changes in the coming weeks.
-
-This is a developing story, and more details will be provided as they emerge.`;
-    }
-    
-    // Add a read more link at the end if we have a valid URL
-    if (newsItem.link) {
-      embed.addFields({ 
-        name: 'Read Original Article', 
-        value: `[Read more at ${newsItem.source}](${newsItem.link})` 
-      });
-    }
-    
-    // If content is too long, truncate it properly at a sentence or paragraph break
-    if (articleContent.length > maxLength) {
-      console.log(`CONTENT DEBUG - Article too long (${articleContent.length} chars), truncating...`);
-      
-      // Find a good breakpoint - try to find the end of a paragraph or sentence
-      // Look for multiple options and pick the best one
-      const lastPeriod = articleContent.lastIndexOf('. ', maxLength - 20);
-      const lastExclamation = articleContent.lastIndexOf('! ', maxLength - 20);
-      const lastQuestion = articleContent.lastIndexOf('? ', maxLength - 20);
-      const lastParagraph = articleContent.lastIndexOf('\n\n', maxLength - 20);
-      
-      console.log(`CONTENT DEBUG - Break points found: Period(${lastPeriod}), Exclamation(${lastExclamation}), Question(${lastQuestion}), Paragraph(${lastParagraph})`);
-      
-      // Find the latest sentence ending that's still within our limit
-      let truncatePoint = Math.max(
-        lastPeriod,
-        lastExclamation,
-        lastQuestion,
-        lastParagraph
-      );
-      
-      console.log(`CONTENT DEBUG - Selected truncate point: ${truncatePoint}`);
-      
-      // If we found a good break point at least halfway through
-      if (truncatePoint > maxLength / 2 && truncatePoint > 0) {
-        // If it's a newline, keep the newline in the result
-        if (truncatePoint === lastParagraph) {
-          articleContent = articleContent.substring(0, truncatePoint) + '\n\n...';
-          console.log(`CONTENT DEBUG - Truncated at paragraph break: ${truncatePoint}`);
+        // Extract a potential topic from the message
+        let topic = content.replace(/generate an image|create an image|make an image/gi, '').trim();
+        
+        // If no specific topic provided, use the most recent news headline
+        if (!topic && recentNewsArticles.length > 0) {
+          topic = recentNewsArticles[0].headline;
+        } else if (!topic) {
+          // Default topic if no recent news and no specified topic
+          topic = "Breaking news headline";
+        }
+        
+        // Reply that we're generating the image
+        await message.reply(`Generating an image for: "${topic}". This might take a minute...`);
+        
+        // Generate the image
+        const imageUrl = await generateNewsImage(topic);
+        
+        if (imageUrl) {
+          try {
+            // Download the image
+            const imageBuffer = await downloadImage(imageUrl);
+            
+            if (imageBuffer) {
+              // Create a safe filename
+              const safeFilename = topic
+                .replace(/[^a-z0-9]/gi, '_')
+                .toLowerCase()
+                .substring(0, 20);
+              
+              // Send directly as an attachment
+              await message.channel.send({
+                content: `Generated image for: "${topic}"\n**DISCLAIMER: This image is AI-generated and fictional. It does not represent real events or people.**`,
+                files: [{
+                  attachment: imageBuffer,
+                  name: `${safeFilename}_generated_image.jpg`
+                }]
+              });
+            } else {
+              // Fallback to URL if download fails
+              await message.channel.send(`Generated image for: "${topic}"\n${imageUrl}\n\n**DISCLAIMER: This image is AI-generated and fictional. It does not represent real events or people.**`);
+            }
+          } catch (downloadError) {
+            console.error('Error downloading image for attachment:', downloadError);
+            // Fallback to URL
+            await message.channel.send(`Generated image for: "${topic}"\n${imageUrl}\n\n**DISCLAIMER: This image is AI-generated and fictional. It does not represent real events or people.**`);
+          }
         } else {
-          // For sentence endings, include the punctuation
-          articleContent = articleContent.substring(0, truncatePoint + 2) + ' ...';
-          console.log(`CONTENT DEBUG - Truncated at sentence end: ${truncatePoint}`);
+          await message.reply("Sorry, I wasn't able to generate that image. Please try again later.");
         }
-      } else {
-        // Fallback: just cut at the limit with an ellipsis
-        articleContent = articleContent.substring(0, maxLength - 20) + ' ...';
-        console.log(`CONTENT DEBUG - Fallback truncation at: ${maxLength - 20}`);
-      }
-      
-      console.log(`CONTENT DEBUG - After truncation: ${articleContent.length} chars`);
-      console.log(`CONTENT DEBUG - Truncated content ends with: ...${articleContent.substring(articleContent.length - 50)}`);
-      
-      // Add a note about truncation with a link to read more
-      if (newsItem.link) {
-        articleContent += `\n\n*This article has been truncated. [Read the full story at ${newsItem.source}](${newsItem.link})*`;
-      } else {
-        articleContent += '\n\n*This article has been truncated.*';
-      }
-    }
-    
-    // Final content check
-    console.log(`CONTENT DEBUG - Final content length: ${articleContent.length} chars`);
-    
-    // Set the description with the properly formatted content
-    embed.setDescription(articleContent);
-    
-    // If we have an image, add it to the embed
-    if (imageUrl) {
-      try {
-        // Make sure to handle undefined imageUrl gracefully
-        embed.setImage(imageUrl);
-        console.log(`IMAGE DEBUG - Added image to Discord embed: ${imageUrl}`);
-        
-        // Add a disclaimer for AI-generated images
-        const isGenerated = !newsItem.image || newsItem.image !== imageUrl;
-        if (isGenerated) {
-          embed.setFooter({
-            text: embed.data.footer.text + ' | AI-generated image for illustrative purposes only. Not an actual photo of events.'
-          });
-        }
-      } catch (imageError) {
-        console.error(`Error setting image in Discord embed: ${imageError.message}`);
-        // Continue without the image rather than failing the whole post
-      }
-    } else {
-      console.warn('No image available for Discord embed');
-    }
-    
-    // Log the full embed data
-    console.log(`CONTENT DEBUG - Final embed title: ${embed.data.title}`);
-    console.log(`CONTENT DEBUG - Final embed description length: ${embed.data.description?.length || 0} chars`);
-    
-    // Post to the Discord channel
-    if (channel) {
-      try {
-        const message = await channel.send({ embeds: [embed] });
-        console.log(`CONTENT DEBUG - Message sent, ID: ${message.id}`);
-        
-        // Check what Discord actually stored by fetching the message we just sent
-        const fetchedMessage = await channel.messages.fetch(message.id);
-        if (fetchedMessage) {
-          const fetchedEmbed = fetchedMessage.embeds[0];
-          console.log(`CONTENT DEBUG - FETCHED MESSAGE - Title: ${fetchedEmbed.title}`);
-          console.log(`CONTENT DEBUG - FETCHED MESSAGE - Description length: ${fetchedEmbed.description?.length || 0}`);
-          console.log(`CONTENT DEBUG - FETCHED MESSAGE - First 100 chars: ${fetchedEmbed.description?.substring(0, 100)}...`);
-          console.log(`CONTENT DEBUG - FETCHED MESSAGE - Last 100 chars: ...${fetchedEmbed.description?.substring(fetchedEmbed.description.length - 100)}`);
-          
-          // Check if image was properly included
-          if (imageUrl && (!fetchedEmbed.image || !fetchedEmbed.image.url)) {
-            console.warn(`IMAGE DEBUG - ⚠️ IMAGE NOT INCLUDED IN DISCORD EMBED! Original URL: ${imageUrl}`);
-          } else if (fetchedEmbed.image && fetchedEmbed.image.url) {
-            console.log(`IMAGE DEBUG - Image successfully included in Discord embed: ${fetchedEmbed.image.url}`);
-          }
-          
-          // Check if description was truncated
-          if (fetchedEmbed.description?.length !== articleContent.length) {
-            console.warn(`CONTENT DEBUG - ⚠️ TRUNCATION DETECTED! Original: ${articleContent.length} chars, Discord stored: ${fetchedEmbed.description?.length} chars`);
-          }
-        }
-        
-        console.log('News posted to Discord successfully');
-
-        // Store the article for context in user interactions
-        storeRecentArticle({
-          headline: newsItem.title,
-          article: enhancedArticle.article, // Use the enhanced article content
-          source: newsItem.source,
-          link: newsItem.link
-        });
-
-        // If the article has a link, make sure it's in our posted URLs set
-        if (newsItem.link) {
-          postedArticleUrls.add(newsItem.link);
-        }
-
+        return;
       } catch (error) {
-        console.error('Error sending message to Discord:', error);
+        console.error('Error generating image for user:', error);
+        await message.reply("Sorry, I encountered an error while generating the image.");
+        return;
       }
-    } else {
-      console.error(`Could not find channel with ID ${NEWS_CHANNEL_ID}`);
     }
-  } catch (error) {
-    console.error('Error posting to Discord:', error);
+    
+    // Handle all other messages (questions, etc.)
+    try {
+      console.log(`Responding to message: ${content}`);
+      
+      // Start typing indicator before generating response
+      message.channel.sendTyping();
+      
+      // Generate a response about recent news using AI, passing the user ID for context
+      const response = await generateNewsResponse(content, recentNewsArticles, userId);
+      
+      // Check if the response needs to be split due to Discord's message limit (2000 chars)
+      if (response.length <= 1900) {
+        // Send as a single message
+        await message.reply(response);
+      } else {
+        // Split the response into parts of approximately 1900 characters
+        const parts = [];
+        let remainingText = response;
+        
+        while (remainingText.length > 0) {
+          // Find a good breaking point (end of sentence) within the limit
+          let breakPoint = 1900;
+          if (remainingText.length > 1900) {
+            // Try to find the last period + space before the limit
+            const lastPeriod = remainingText.substring(0, 1900).lastIndexOf('. ');
+            if (lastPeriod > 1000) { // Only break at a period if it's not too short
+              breakPoint = lastPeriod + 1; // Include the period but not the space
+            }
+          }
+          
+          // Add this part to our parts array
+          parts.push(remainingText.substring(0, breakPoint));
+          
+          // Remove this part from the remaining text
+          remainingText = remainingText.substring(breakPoint).trim();
+        }
+        
+        // Send each part as a separate message
+        for (let i = 0; i < parts.length; i++) {
+          // Show typing indicator between sending parts to simulate typing pause
+          if (i > 0) message.channel.sendTyping();
+          
+          const prefix = (i === 0) ? '' : '(continued) ';
+          
+          // Use message.channel.send instead of message.reply for follow-up messages
+          if (i === 0) {
+            await message.reply(`${parts[i]}`);
+          } else {
+            await message.channel.send(`${prefix}${parts[i]}`);
+          }
+          
+          // Wait a short period between sending parts to make it feel more natural
+          if (i < parts.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error responding to user:', error.message);
+      // Add more details to the error log to help with debugging
+      if (error.stack) console.error(error.stack);
+      await message.reply('Sorry, I encountered an error while processing your request.');
+    }
   }
-}
+});
 
 // Login to Discord with the token
 client.login(process.env.DISCORD_TOKEN); 
