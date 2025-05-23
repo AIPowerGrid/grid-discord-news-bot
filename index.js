@@ -539,11 +539,89 @@ async function fetchLatestNews() {
               
               // Log content sources and lengths for debugging
               console.log(`CONTENT DEBUG - Content sources available:`, {
-                content: item.content ? `${item.content.substring(0, 50)}... (${item.content.length} chars)` : 'none',
-                contentSnippet: item.contentSnippet ? `${item.contentSnippet.substring(0, 50)}... (${item.contentSnippet.length} chars)` : 'none',
-                summary: item.summary ? `${item.summary.substring(0, 50)}... (${item.summary.length} chars)` : 'none',
-                description: item.description ? `${item.description.substring(0, 50)}... (${item.description.length} chars)` : 'none'
+                content: item.content ? 'available' : 'none',
+                contentSnippet: item.contentSnippet ? 'available' : 'none',
+                summary: item.summary ? 'available' : 'none',
+                description: item.description ? 'available' : 'none'
               });
+              
+              // Log full item structure for debugging
+              console.log('FULL ITEM DEBUG:', JSON.stringify(item, null, 2).substring(0, 500) + '...');
+              
+              // Try harder to parse content from HTML
+              if (item.description && item.description.includes('CDATA')) {
+                // Extract content from CDATA section
+                const cdataMatch = item.description.match(/<!\[CDATA\[(.*?)\]\]>/s);
+                if (cdataMatch && cdataMatch[1]) {
+                  console.log('CONTENT DEBUG - Extracted content from CDATA section');
+                  const cdataContent = cdataMatch[1].trim();
+                  if (cdataContent.length > content.length) {
+                    content = cdataContent;
+                  }
+                }
+              }
+              
+              // Check for HTML content and extract text
+              if ((content.includes('<p>') || content.includes('<div>')) && content.length > 0) {
+                console.log('CONTENT DEBUG - Extracting text from HTML content');
+                try {
+                  // Remove HTML tags but preserve paragraph breaks
+                  const plainText = content
+                    .replace(/<p[^>]*>/gi, '\n\n')
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/<div[^>]*>/gi, '\n')
+                    .replace(/<\/div>/gi, '')
+                    .replace(/<\/p>/gi, '')
+                    .replace(/<li[^>]*>/gi, '\n• ')
+                    .replace(/<\/li>/gi, '')
+                    .replace(/<[^>]*>/g, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+                    
+                  if (plainText.length > 0) {
+                    content = plainText;
+                    console.log(`CONTENT DEBUG - Extracted ${plainText.length} chars of plain text from HTML`);
+                  }
+                } catch (error) {
+                  console.error('CONTENT DEBUG - Error extracting text from HTML:', error.message);
+                }
+              }
+              
+              // Parse media:content or media:description if available
+              if (item['media:description'] && item['media:description']['#']) {
+                console.log('CONTENT DEBUG - Found media:description');
+                const mediaDesc = item['media:description']['#'].trim();
+                if (mediaDesc.length > content.length) {
+                  content = mediaDesc;
+                }
+              }
+              
+              // Special handling for CNN feeds
+              if (feed.url.includes('cnn.com') && item.description) {
+                console.log('CONTENT DEBUG - Special handling for CNN feed');
+                
+                // CNN often puts the actual content in description
+                if (typeof item.description === 'string') {
+                  // Handle CDATA wrapped content
+                  if (item.description.includes('CDATA')) {
+                    const cdataMatch = item.description.match(/<!\[CDATA\[(.*?)\]\]>/s);
+                    if (cdataMatch && cdataMatch[1]) {
+                      const cdataContent = cdataMatch[1].trim();
+                      if (cdataContent.length > 30) { // Ensure it's meaningful content
+                        console.log(`CONTENT DEBUG - Extracted CNN description from CDATA: ${cdataContent.length} chars`);
+                        content = cdataContent;
+                      }
+                    }
+                  } else {
+                    // Regular description without CDATA
+                    const plainDesc = item.description.trim();
+                    if (plainDesc.length > 30 && plainDesc.length > content.length) {
+                      console.log(`CONTENT DEBUG - Using CNN description: ${plainDesc.length} chars`);
+                      content = plainDesc;
+                    }
+                  }
+                }
+              }
               
               // If content is too short, try to construct a better content from available information
               if (content.length < 100) {
