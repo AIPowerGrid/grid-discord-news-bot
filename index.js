@@ -1188,15 +1188,14 @@ async function generateNewsImage(title, content) {
 The image should be eye-catching and appropriate for a news site, with high detail, realistic textures, and professional composition.
 Style: Photojournalistic, high definition news photography`;
     
-    // Submit request to the API using flux-photo style parameters
+    // Use the flux-photo style template instead of raw parameters
     const response = await axios.post(IMAGE_GENERATION_ENDPOINT, {
       prompt: prompt,
-      models: ["Flux.1-Schnell fp8 (Compact)"],
-      size: "896x1152",
-      steps: 4,
-      cfg_scale: 1,
-      karras: false,
-      sampler_name: "k_euler"
+      style: "flux-photo",  // Use the predefined flux-photo style
+      // The style template will provide these parameters automatically:
+      // - model: "Flux.1-Schnell fp8 (Compact)"
+      // - width: 896, height: 1152
+      // - steps: 4, cfg_scale: 1, sampler_name: "k_euler"
     }, {
       headers: {
         'Content-Type': 'application/json',
@@ -1234,7 +1233,7 @@ Style: Photojournalistic, high definition news photography`;
   } catch (error) {
     console.error('Error generating news image:', error.message);
     
-    // Try with the fallback model if specified and different
+    // Try with the fallback model but still using flux-photo style
     if (FALLBACK_IMAGE_MODEL && FALLBACK_IMAGE_MODEL !== IMAGE_MODEL) {
       console.log(`Trying with fallback image model ${FALLBACK_IMAGE_MODEL}`);
       try {
@@ -1242,15 +1241,11 @@ Style: Photojournalistic, high definition news photography`;
 The image should be eye-catching and appropriate for a news site, with high detail, realistic textures, and professional composition.
 Style: Photojournalistic, high definition news photography`;
         
-        // Submit request to the API with fallback model - still using flux-photo style parameters
+        // Submit request to the API with fallback model but still using style template
         const response = await axios.post(IMAGE_GENERATION_ENDPOINT, {
           prompt: prompt,
-          models: [FALLBACK_IMAGE_MODEL],
-          size: "896x1152",
-          steps: 4,
-          cfg_scale: 1,
-          karras: false,
-          sampler_name: "k_euler"
+          style: "flux-photo",
+          models: [FALLBACK_IMAGE_MODEL]  // Override just the model but keep the style
         }, {
           headers: {
             'Content-Type': 'application/json',
