@@ -1381,7 +1381,7 @@ async function postNewsToDiscord(title, content, link, source, pubDate, imageUrl
     }
     
     // Build the embed
-    const embed = new Discord.EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor('#0099ff')
       .setTitle(title)
       .setURL(link)
