@@ -3,6 +3,7 @@ const { Client, GatewayIntentBits, EmbedBuilder, Partials, ActionRowBuilder, But
 const axios = require('axios');
 const Parser = require('rss-parser');
 const { decode } = require('html-entities');
+const { normalizeApiText, sanitizeHtmlForDiscord } = require('./utils');
 
 // Create RSS parser instance
 const rssParser = new Parser();
@@ -99,28 +100,7 @@ const MAX_MESSAGE_HISTORY = 5; // Number of messages to remember per user
 // Sleep function for polling
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * Normalizes text from AI Power Grid API responses, fixing newlines and formatting issues
- * @param {string} text - The raw text from the API response
- * @returns {string} - Normalized text with proper newlines
- */
-function normalizeApiText(text) {
-  if (!text) return '';
-  
-  let normalized = text;
-  
-  // Remove newlines that break words (this is the main issue with the API)
-  normalized = normalized.replace(/(\S)\n(\S)/g, '$1$2');
-  
-  // Normalize standard newlines
-  normalized = normalized
-    .replace(/\r\n/g, '\n')  // Convert Windows line endings
-    .replace(/\r/g, '\n')    // Convert old Mac line endings
-    .replace(/\n{3,}/g, '\n\n')  // Remove excessive line breaks
-    .trim();
-    
-  return normalized;
-}
+// normalizeApiText is now imported from ./utils.js so it can be unit-tested.
 
 // Function to poll for text generation results
 async function pollForTextResults(generationId, maxWaitTimeSeconds = 60) {
@@ -563,27 +543,7 @@ async function generateAndPostNews() {
   }
 }
 
-// Function to sanitize HTML content for Discord
-function sanitizeHtmlForDiscord(htmlContent) {
-  if (!htmlContent) return '';
-  
-  // Convert HTML entities to plain text characters
-  let content = decode(htmlContent);
-  
-  // Remove HTML tags, keeping their content
-  content = content
-    // Remove image tags completely
-    .replace(/<img[^>]*>/g, '')
-    // Remove figure and figcaption tags completely
-    .replace(/<figure[^>]*>[\s\S]*?<\/figure>/g, '')
-    // Remove all other HTML tags but keep their content
-    .replace(/<[^>]*>/g, '')
-    // Fix extra newlines
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  
-  return content;
-}
+// sanitizeHtmlForDiscord is now imported from ./utils.js so it can be unit-tested.
 
 // Function to fetch latest news from RSS feeds
 async function fetchLatestNews() {
