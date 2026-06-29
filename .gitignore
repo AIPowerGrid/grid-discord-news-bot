@@ -75,3 +75,9 @@ tmp/
 
 # Example repositories
 example_repos/
+
+# runtime db
+newsbot.db*
+*.db
+*.db-shm
+*.db-wal
