@@ -133,7 +133,9 @@ async function curate(a) {
       { role: 'system', content: EDITORIAL_SYSTEM },
       { role: 'user', content: editorialUser(a) },
     ],
-    { maxTokens: 700 }
+    // Reasoning models (qwen3-27b) spend tokens "thinking" before the answer —
+    // give enough headroom that the JSON answer survives after the reasoning.
+    { maxTokens: 2500 }
   );
   if (!j || typeof j.relevant !== 'boolean') return null;
   return {
