@@ -13,9 +13,10 @@ A Discord bot that automatically generates and posts real news updates using AI 
 
 ## Prerequisites
 
-- Node.js (v14 or later)
+- Node.js 20 or later
 - A Discord bot token
-- An AI Power Grid API key
+- An AI Power Grid API key from
+  [the developer console](https://console.aipowergrid.io/dashboard/api-key)
 
 ## Installation
 
@@ -46,19 +47,18 @@ A Discord bot that automatically generates and posts real news updates using AI 
 
 ### Optional Environment Variables:
 
-- `NEWS_CHECK_INTERVAL`: How often to check for news (in minutes)
-- `POLL_TIMEOUT_TEXT_RESULTS`: Maximum time to wait for text generation results (in seconds)
-- `POLL_TIMEOUT_IMAGE_RESULTS`: Maximum time to wait for image generation results (in seconds)
-- `ENABLE_POLLS`: Set to "true" or "false" to enable/disable automatic poll creation
+- `GRID_API_BASE`: Canonical Grid v1 base (default `https://api.aipowergrid.io/v1`)
+- `TEXT_MODEL`: Text model name; verify current availability with `/v1/models`
+- `IMAGE_MODEL`: Image model name; verify current availability with `/v1/status/models`
+- `UPDATE_FREQUENCY`: How often to check for news, in minutes
+- `MAX_CANDIDATES`: Maximum recent feed items considered per run
+- `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`
+- `DB_PATH`: SQLite state path
+- `NEWS_FEEDS`: Comma-separated `name|url` feed list
 
-### Prompt Templates:
-
-The `.env` file contains several prompt templates that you can customize:
-
-- `NEWS_ENHANCEMENT_PROMPT`: Template for enhancing news content
-- `IMAGE_PROMPT_TEMPLATE`: Template for generating images
-- `LLM_ASSISTED_IMAGE_PROMPT_GENERATION`: Template for generating image prompts using LLM
-- `POLL_CREATION_PROMPT`: Template for deciding whether to create polls and what options to include
+Editorial safety prompts are source-controlled in `index.js`; the environment
+does not override them. Feed content is untrusted and summaries must stay
+grounded in the source text.
 
 ## Usage
 
@@ -80,9 +80,10 @@ node index.js
 
 Edit the `NEWS_FEEDS` array in `index.js` to add or remove news sources.
 
-### Prompt Engineering
+### Editorial behavior
 
-You can customize how the AI generates content by editing the prompt templates in your `.env` file.
+Change the source-controlled prompt only with tests/review. Preserve source
+links and the label on AI-generated illustrative images.
 
 ## Contributing
 

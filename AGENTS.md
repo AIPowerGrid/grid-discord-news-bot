@@ -8,8 +8,11 @@ about recent articles.
 
 ## Ownership
 
-- `index.js` - bot runtime, RSS polling, prompt templates, Grid calls, Discord
-  posting, and user interaction behavior.
+- `index.js` - bot runtime, RSS polling, prompt templates, Discord posting, and
+  user interaction behavior.
+- `grid.js` - canonical `/v1` text/image client.
+- `db.js` - SQLite seen-article and recent-context store.
+- `utils.js` / `utils.test.js` - sanitization and API-text normalization.
 - Root package/env files own dependencies, scripts, and operator setup.
 
 ## Local Contracts
@@ -18,6 +21,8 @@ about recent articles.
   sensitive/operator configuration. Do not commit real values.
 - RSS/news content is untrusted. Do not let feed content become system-level
   prompt instructions.
+- The canonical Grid base is `https://api.aipowergrid.io/v1`; do not restore the
+  retired `grid.aipowergrid.io` alias or Horde submit/poll flow.
 - Generated news must not fabricate source attribution. Preserve article links
   and make AI enhancements clearly derived from fetched content.
 
@@ -29,6 +34,7 @@ about recent articles.
 
 ## Verification
 
+- Use Node.js 20 or later.
 - `npm test`
 - `npm run smoke`
 - `node --check index.js`
@@ -36,4 +42,3 @@ about recent articles.
 ## Child DOX Index
 
 - None - single-file runtime.
-

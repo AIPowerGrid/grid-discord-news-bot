@@ -4,7 +4,7 @@
 // /v1/chat/completions and /v1/images/generations calls. No poll loops.
 const axios = require('axios');
 
-const BASE = (process.env.GRID_API_BASE || 'https://grid.aipowergrid.io/v1').replace(/\/+$/, '');
+const BASE = (process.env.GRID_API_BASE || 'https://api.aipowergrid.io/v1').replace(/\/+$/, '');
 const KEY = process.env.GRID_API_KEY;
 const TEXT_MODEL = process.env.TEXT_MODEL || 'qwen3-27b';
 const IMAGE_MODEL = process.env.IMAGE_MODEL || 'z-image-turbo';
