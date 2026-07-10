@@ -37,6 +37,7 @@ about recent articles.
 - Use Node.js 20 or later.
 - `npm test`
 - `npm run smoke`
+- `npm audit` must report zero known vulnerabilities before release.
 - `node --check index.js`
 
 ## Child DOX Index

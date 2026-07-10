@@ -30,9 +30,9 @@
   },
   "homepage": "https://github.com/AIPowerGrid/grid-discord-news-bot#readme",
   "dependencies": {
-    "axios": "^1.15.0",
+    "axios": "^1.18.1",
     "better-sqlite3": "^11.8.1",
-    "discord.js": "^14.14.1",
+    "discord.js": "^14.26.4",
     "dotenv": "^16.3.1",
     "html-entities": "^2.6.0",
     "rss-parser": "^3.13.0"
@@ -43,5 +43,12 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "overrides": {
+    "brace-expansion@>=5.0.0 <5.0.7": "5.0.7",
+    "form-data": "4.0.6",
+    "js-yaml": "3.15.0",
+    "undici": "6.27.0",
+    "ws": "8.21.0"
   }
 }
